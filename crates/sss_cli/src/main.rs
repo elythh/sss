@@ -145,13 +145,16 @@ fn main() -> Result<(), Report> {
                 g_config.output = path.to_string_lossy().into_owned();
             }
         }
-        let result = generate_image(g_config, Screenshot::pre_rendered(pre.image));
+        let gen_output = pre.action.save
+            || (!g_config.output.trim().is_empty() && g_config.output != "out.png");
+        let result = generate_image(gen_output, g_config, Screenshot::pre_rendered(pre.image));
         #[cfg(feature = "ocr")]
         finish_prewarm(prewarm);
         return Ok(result?);
     }
 
     let result = generate_image(
+        !g_config.output.is_empty(),
         g_config,
         Screenshot::from_target(direct.unwrap(), config.show_cursor),
     );
