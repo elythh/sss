@@ -1,12 +1,17 @@
 [package]
 name = "sss_core"
 description = "Shared primitives (color, blur) used by sss_lib and sss_capture_ui"
-version = "0.1.0"
+version = "0.2.1"
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 edition.workspace = true
 license.workspace = true
+
+# Library crate — bumps version + commit via cargo-release, but never tags.
+# Only sss_cli + sss_code emit tags (those drive the Release workflow).
+[package.metadata.release]
+tag = false
 
 [features]
 default = []

@@ -1,7 +1,7 @@
 [package]
 name = "sss_cli"
 description = "Take pretty screenshots of your screen"
-version = "0.1.5"
+version = "0.2.1"
 publish = false
 default-run = "sss"
 authors.workspace = true
@@ -14,14 +14,20 @@ license.workspace = true
 name = "sss"
 path = "./src/main.rs"
 
-[package.metadata.dist]
-dist = true
-
-[package.metadata.wix]
-upgrade-guid = "CF05D879-DF84-4B30-BAEF-1B68E1DAD701"
-path-guid = "50D7445F-C399-4C23-A8FF-6BE599929DE9"
-license = false
-eula = false
+[features]
+default = ["ocr"]
+# Compile in the OCR pipeline (sss_ocr + onnxruntime dlopen path). Turning
+# this off drops every OCR config field, CLI flag and runtime worker —
+# binary stays a pure screenshot tool, no libonnxruntime needed at runtime.
+ocr = ["dep:sss_ocr"]
+# Execution-provider features only make sense alongside `ocr`; they imply
+# it so a stray `--features cuda` still produces a working binary.
+cuda = ["ocr", "sss_ocr/cuda"]
+tensorrt = ["ocr", "sss_ocr/tensorrt"]
+coreml = ["ocr", "sss_ocr/coreml"]
+directml = ["ocr", "sss_ocr/directml"]
+openvino = ["ocr", "sss_ocr/openvino"]
+webgpu = ["ocr", "sss_ocr/webgpu"]
 
 [dependencies]
 clap.workspace = true
@@ -37,3 +43,4 @@ mouse_position = { git = "https://github.com/SergioRibera/mouse_position", branc
 sss_lib = { path = "../sss_lib" }
 sss_capture = { path = "../sss_capture" }
 sss_capture_ui = { path = "../sss_capture_ui" }
+sss_ocr = { path = "../sss_ocr", optional = true }

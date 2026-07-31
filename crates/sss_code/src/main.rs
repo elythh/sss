@@ -133,6 +133,7 @@ fn main() -> Result<(), Report> {
     }
 
     Ok(generate_image(
+        !g_config.output.is_empty(),
         g_config.clone(),
         ImageCode {
             config,

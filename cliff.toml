@@ -1,0 +1,60 @@
+# git-cliff configuration — Conventional Commits → release notes.
+# https://git-cliff.org/docs/configuration
+#
+# `--current` (used in CI) emits the section for the tag currently being
+# released, walking back to the previous tag matching `tag_pattern`. This
+# repo cuts two parallel tag streams (both prefixed per-crate by
+# cargo-release's `tag-prefix = "{{crate_name}}/"`):
+#   - `sss_cli/vX.Y.Z`      for the `sss` (sss_cli) binary
+#   - `sss_code/vX.Y.Z`     for the `sss_code` binary
+# Legacy bare `vX.Y.Z` tags (pre-prefix migration) are kept in the
+# pattern so old release notes still render if someone re-runs cliff
+# against them. git-cliff treats each tag independently, so the
+# changelog naturally scopes to commits since whichever predecessor tag
+# the release script resolves.
+
+[changelog]
+header = ""
+trailer = ""
+body = """
+{% if version %}\
+## What's changed in {{ version | trim_start_matches(pat="v") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | upper_first | trim }}\
+{% if commit.breaking %} **[breaking]**{% endif %}\
+{% if commit.id %} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/SergioRibera/sss/commit/{{ commit.id }})){% endif %}
+{% endfor %}\
+{% endfor %}\n
+"""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^style", group = "Style" },
+  { message = "^test", group = "Tests" },
+  { message = "^build", group = "Build" },
+  { message = "^ci", group = "CI" },
+  { message = "^chore\\(release\\)", skip = true },
+  # cargo-release writes `chore: Release <crate> version <ver>` for every
+  # per-crate bump commit. That commit IS the tag boundary, so it's
+  # redundant inside the release notes for that same tag.
+  { message = "^chore: Release ", skip = true },
+  { message = "^chore", group = "Chore" },
+  { message = ".*", group = "Other" },
+]
+filter_commits = false
+# Both release streams + legacy bare `v*`.
+tag_pattern = "(sss_cli/v|sss_code/v|v)[0-9]+\\.[0-9]+\\.[0-9]+"
+sort_commits = "newest"

@@ -1,0 +1,95 @@
+{% import "macros/ui.html" as ui %}
+
+{% macro os_section(label, os_key, accent, binary, assets, package_managers) %}
+<section class="install-os-section accent-{{ accent }}" data-os-section="{{ os_key }}">
+  <div class="install-os-head">
+    <span class="install-os-icon">{{ ui::os_icon(os=os_key) }}</span>
+    <h2>{{ label }}</h2>
+    <span class="install-os-detected" data-os-detected hidden>your OS</span>
+  </div>
+
+  <div class="install-tabs" data-install-tabs>
+    <div class="install-tabs-tablist" role="tablist">
+      {% if package_managers %}
+        <button type="button" role="tab" class="is-active" data-tab="pm" aria-selected="true">
+          Package managers
+          <span class="tab-count">{{ package_managers | length }}</span>
+        </button>
+      {% endif %}
+      {% if assets %}
+        <button type="button" role="tab" data-tab="dl" aria-selected="false" {% if not package_managers %}class="is-active"{% endif %}>
+          Direct download
+          <span class="tab-count">{{ assets | length }}</span>
+        </button>
+      {% endif %}
+    </div>
+
+    {% if package_managers %}
+      <div role="tabpanel" data-tab-panel="pm" class="install-tab-panel is-active">
+        <div class="install-pane-grid">
+          {% for pm in package_managers %}
+            <div class="install-pkg">
+              <div class="install-pkg-head">
+                <h4>{{ pm.name }}</h4>
+                {{ ui::badge(text=pm.kind, kind="default") }}
+              </div>
+              <p class="text-muted">{{ pm.description }}</p>
+              {{ ui::command(text=pm.command) }}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if assets %}
+      <div role="tabpanel" data-tab-panel="dl" class="install-tab-panel {% if not package_managers %}is-active{% endif %}" {% if package_managers %}hidden{% endif %}>
+        <div class="install-assets-grid">
+          {% for a in assets %}
+            <a class="install-asset" href="{{ a.url }}" rel="noopener" download
+               data-arch="{{ a.arch }}" data-format="{{ a.format }}">
+              <span class="install-asset-format">{{ a.format }}</span>
+              <div class="install-asset-body">
+                <strong class="install-asset-arch">{{ a.arch }}</strong>
+                <span class="install-asset-name"><code>{{ a.name }}</code></span>
+              </div>
+              <span class="install-asset-size">{{ a.size_human | default(value=a.size) }}</span>
+              <span class="install-asset-download" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M5 12l7 7 7-7M5 21h14"/></svg>
+              </span>
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if not package_managers and not assets %}
+      <div class="install-tab-panel is-active">
+        <div class="callout callout-info">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+          <div class="callout-body">
+            <strong>No artifacts yet for <code>{{ binary }}</code> on {{ label }}.</strong>
+            <p>The next tagged release will populate this list automatically.</p>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endmacro os_section %}
+
+{% macro windows_unsupported() %}
+<section class="install-os-section accent-secondary" data-os-section="windows">
+  <div class="install-os-head">
+    <span class="install-os-icon">{{ ui::os_icon(os="windows") }}</span>
+    <h2>Windows</h2>
+    <span class="install-os-detected" data-os-detected hidden>your OS</span>
+  </div>
+  <div class="callout callout-warn">
+    <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    <div class="callout-body">
+      <strong>Windows builds aren't shipped yet.</strong>
+      <p>Capture targets Wayland, X11 and macOS today. <code>sss_code</code> may cross-compile via mingw — issue welcome.</p>
+    </div>
+  </div>
+</section>
+{% endmacro windows_unsupported %}

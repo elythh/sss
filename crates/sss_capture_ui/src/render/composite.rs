@@ -19,7 +19,25 @@ pub fn flatten(image: &mut RgbaImage, canvas: &Canvas, origin: (i32, i32)) {
     }
 }
 
+/// Render every shape that sits *below* the first `BlurRect` in z-order
+/// — used to build the "below the blur" source for the live preview.
+/// Shapes drawn on top of a blur don't contribute (they'd otherwise show
+/// up in the blurred sample as ghost halos around the user's strokes).
+pub fn flatten_below_first_blur(
+    image: &mut RgbaImage,
+    canvas: &Canvas,
+    origin: (i32, i32),
+) {
+    for shape in canvas.shapes() {
+        if matches!(shape.kind, ShapeKind::BlurRect { .. }) {
+            break;
+        }
+        paint_one(image, shape, origin);
+    }
+}
+
 /// Like [`flatten`] but also paints in-flight previews on top.
+#[allow(dead_code)]
 pub fn flatten_with_preview(image: &mut RgbaImage, canvas: &Canvas, origin: (i32, i32)) {
     for shape in canvas.shapes() {
         paint_one(image, shape, origin);
@@ -76,10 +94,23 @@ fn draw_shape(img: &mut RgbaImage, shape: &Shape, origin: (i32, i32)) {
         FreehandStroke { points } => {
             let color = shape.style.stroke;
             let w = shape.style.stroke_width.max(1.0) as i32;
-            for pair in points.windows(2) {
-                let a = local(pair[0], origin);
-                let b = local(pair[1], origin);
-                stroke_line_aa(img, a, b, color, w);
+            let smoothed = crate::shape::smoothed_freehand(points, w as f32);
+            if smoothed.len() == 1 {
+                fill_disk(img, local(smoothed[0], origin), (w / 2).max(0), color);
+            } else if smoothed.len() >= 2 {
+                let r = (w / 2).max(0);
+                for pair in smoothed.windows(2) {
+                    let a = local(pair[0], origin);
+                    let b = local(pair[1], origin);
+                    stroke_line_aa(img, a, b, color, w);
+                    // Disk at every joint covers miter gaps when the curve
+                    // turns sharply.
+                    fill_disk(img, a, r, color);
+                }
+                // End cap.
+                if let Some(last) = smoothed.last() {
+                    fill_disk(img, local(*last, origin), r, color);
+                }
             }
         }
         Line { from, to } => {

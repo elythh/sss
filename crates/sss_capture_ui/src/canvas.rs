@@ -1,6 +1,7 @@
 //! Canvas state — the editable model behind the overlay.
 
 use sss_capture::Rect;
+use sss_core::ocr::TextBox;
 
 use crate::geometry::{FPoint, FRect};
 use crate::shape::{Shape, ShapeId, ShapeKind, Style};
@@ -37,6 +38,13 @@ pub struct Canvas {
     pending_polygon: Option<Vec<FPoint>>,
     /// Hold-Shift constrain: snap lines to 45° and rect/ellipse to square.
     constrain: bool,
+    /// OCR detections in the captured image's pixel coordinate space.
+    /// Empty when OCR is disabled or still downloading models.
+    text_boxes: Vec<TextBox>,
+    /// Indices into `text_boxes` that the user has clicked while the
+    /// Pointer (select) tool was active. `Ctrl+C` joins these and pushes
+    /// the result to the clipboard instead of the screenshot.
+    selected_text_boxes: Vec<usize>,
 }
 
 impl Default for Canvas {
@@ -55,6 +63,8 @@ impl Default for Canvas {
             fill_color: None,
             pending_polygon: None,
             constrain: false,
+            text_boxes: Vec::new(),
+            selected_text_boxes: Vec::new(),
         };
         // Seed history so the first user action is undoable.
         s.history.snapshot(&s.shapes);
@@ -79,6 +89,81 @@ impl Canvas {
 
     pub fn fill_color(&self) -> Option<crate::color::Color> {
         self.fill_color
+    }
+
+    /// OCR detections that should be drawn / hit-tested. Populated
+    /// asynchronously by the OCR worker once the recogniser finishes.
+    pub fn text_boxes(&self) -> &[TextBox] {
+        &self.text_boxes
+    }
+
+    /// Replace the OCR detection set. Called from the platform driver
+    /// when the OCR worker delivers its result.
+    pub fn set_text_boxes(&mut self, boxes: Vec<TextBox>) {
+        self.text_boxes = boxes;
+        self.selected_text_boxes.clear();
+    }
+
+    /// True when OCR returned at least one detection.
+    pub fn has_ocr(&self) -> bool {
+        !self.text_boxes.is_empty()
+    }
+
+    /// Indices currently selected in [`Self::text_boxes`].
+    pub fn selected_text_indices(&self) -> &[usize] {
+        &self.selected_text_boxes
+    }
+
+    /// True when the click that lands on `point` falls inside any
+    /// recognised polygon — used by the driver to decide whether the
+    /// pointer-down is an OCR selection or a normal Pointer tool action.
+    pub fn ocr_hit(&self, x: f32, y: f32) -> Option<usize> {
+        self.text_boxes
+            .iter()
+            .position(|tb| tb.contains_point(x, y))
+    }
+
+    /// Toggle `idx` in the OCR selection set. No-op if `idx` is out of
+    /// range. Returns the new membership state.
+    pub fn toggle_text_box_selection(&mut self, idx: usize) -> bool {
+        if idx >= self.text_boxes.len() {
+            return false;
+        }
+        if let Some(pos) = self.selected_text_boxes.iter().position(|&i| i == idx) {
+            self.selected_text_boxes.remove(pos);
+            false
+        } else {
+            self.selected_text_boxes.push(idx);
+            true
+        }
+    }
+
+    /// Drop every OCR box from the selection set.
+    pub fn clear_text_selection(&mut self) {
+        self.selected_text_boxes.clear();
+    }
+
+    /// Has the user selected at least one OCR box?
+    pub fn has_text_selection(&self) -> bool {
+        !self.selected_text_boxes.is_empty()
+    }
+
+    /// Joined text of every selected OCR box, in selection order.
+    /// `None` when nothing is selected.
+    pub fn selected_text(&self) -> Option<String> {
+        if self.selected_text_boxes.is_empty() {
+            return None;
+        }
+        let mut out = String::new();
+        for (n, &idx) in self.selected_text_boxes.iter().enumerate() {
+            if let Some(tb) = self.text_boxes.get(idx) {
+                if n > 0 {
+                    out.push('\n');
+                }
+                out.push_str(&tb.text);
+            }
+        }
+        Some(out)
     }
 
     /// All committed shapes, back-to-front.
@@ -450,7 +535,18 @@ impl Canvas {
 
     fn on_move(&mut self, p: FPoint) {
         match self.drag.as_mut() {
-            Some(Drag::Stroke { points }) => points.push(p),
+            Some(Drag::Stroke { points }) => {
+                // Drop clustered pointer events (>1px from last) so wobble
+                // doesn't pile up. Smoothing at render time also de-noises,
+                // but trimming inputs keeps the stored point list compact.
+                let push = points
+                    .last()
+                    .map(|l| l.distance(p) >= 1.0)
+                    .unwrap_or(true);
+                if push {
+                    points.push(p);
+                }
+            }
             Some(Drag::TwoPoint { from, to }) => {
                 *to = if self.constrain {
                     apply_constraint(&self.active_tool, *from, p)

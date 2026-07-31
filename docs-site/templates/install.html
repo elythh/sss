@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% import "macros/install.html" as install %}
+
+{% block body %}
+<div class="install-layout">
+  <header class="install-header">
+    <h1>Install <span class="binary" data-binary-label>sss</span></h1>
+    <p class="text-muted">
+      Pick a package manager or grab a raw artifact. The section marked
+      <em>your OS</em> is auto-selected from your browser.
+    </p>
+
+    <div class="install-binary-toggle" data-binary-toggle role="tablist" aria-label="Binary">
+      <button type="button" class="is-active" data-binary="sss" aria-selected="true">sss</button>
+      <button type="button" data-binary="sss_code" aria-selected="false">sss_code</button>
+    </div>
+
+    {% set releases = load_data(path="data/releases.json", required=false) %}
+    {% if releases and releases.tags %}
+      <p class="install-release-meta">
+        Artifacts pulled from
+        {% for t in releases.tags %}<a href="{{ config.extra.github_repo }}/releases/tag/{{ t }}" rel="noopener"><code>{{ t }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}.
+      </p>
+    {% endif %}
+  </header>
+
+  {% set packages = load_data(path="data/packages.toml") %}
+  {% set all_assets = [] %}
+  {% if releases and releases.assets %}
+    {% set all_assets = releases.assets %}
+  {% endif %}
+
+  {# ---------- sss pane ---------- #}
+  <div class="install-binary-pane" data-binary-pane="sss">
+    <div class="install-os-grid">
+      {% set linux_sss = all_assets | filter(attribute="os", value="linux") | filter(attribute="binary", value="sss") %}
+      {% set macos_sss = all_assets | filter(attribute="os", value="macos") | filter(attribute="binary", value="sss") %}
+      {{ install::os_section(label="Linux", os_key="linux", accent="primary", binary="sss", package_managers=packages.linux.sss, assets=linux_sss) }}
+      {{ install::os_section(label="macOS", os_key="macos", accent="tertiary", binary="sss", package_managers=packages.macos.sss, assets=macos_sss) }}
+      {{ install::windows_unsupported() }}
+    </div>
+  </div>
+
+  {# ---------- sss_code pane ---------- #}
+  <div class="install-binary-pane" data-binary-pane="sss_code" hidden>
+    <div class="install-os-grid">
+      {% set linux_code = all_assets | filter(attribute="os", value="linux") | filter(attribute="binary", value="sss_code") %}
+      {% set macos_code = all_assets | filter(attribute="os", value="macos") | filter(attribute="binary", value="sss_code") %}
+      {{ install::os_section(label="Linux", os_key="linux", accent="primary", binary="sss_code", package_managers=packages.linux.sss_code, assets=linux_code) }}
+      {{ install::os_section(label="macOS", os_key="macos", accent="tertiary", binary="sss_code", package_managers=packages.macos.sss_code, assets=macos_code) }}
+      {{ install::windows_unsupported() }}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ get_url(path='js/install-tabs.js') | safe }}" defer></script>
+{% endblock %}

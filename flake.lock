@@ -52,13 +52,36 @@
         "type": "github"
       }
     },
+    "nix-bundle-app": {
+      "inputs": {
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1782500566,
+        "narHash": "sha256-juhNWftj7zwg18WL9HrcO8ggBYqSfZcJpEZek+lsQyc=",
+        "owner": "SergioRibera",
+        "repo": "nix-bundle-app",
+        "rev": "5558334955265d08abd4604fe0ca4abb159f9fbf",
+        "type": "github"
+      },
+      "original": {
+        "owner": "SergioRibera",
+        "repo": "nix-bundle-app",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1778443072,
-        "narHash": "sha256-zi7/fsqM/kFdNuED//4WOCUtezGtKKqRNORjMvfwjnA=",
+        "lastModified": 1781577229,
+        "narHash": "sha256-lrp67w8AulE9Ks53n27I45ADSzbOCn4H+CNW1Ck8B+8=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "da5ad661ba4e5ef59ba743f0d112cbc30e474f32",
+        "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
         "type": "github"
       },
       "original": {
@@ -89,6 +112,7 @@
         "crane": "crane",
         "fenix": "fenix",
         "flake-utils": "flake-utils",
+        "nix-bundle-app": "nix-bundle-app",
         "nixpkgs": "nixpkgs_2"
       }
     },

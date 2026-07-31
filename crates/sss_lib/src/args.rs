@@ -54,6 +54,13 @@ pub struct GenerationSettingsArgs {
     #[clap(long, help = "[default: 100]")]
     #[merge(strategy = swap_option)]
     pub padding_y: Option<u32>,
+    /// Disable the padding + background frame that `sss` normally wraps
+    /// every capture with. Inverted polarity intentional — the border is
+    /// on by default and there is no `--border` opposite.
+    #[clap(long, help = "Skip the background/padding border around the capture")]
+    #[merge(strategy = overwrite_false)]
+    #[serde(default = "default_bool")]
+    pub no_border: bool,
     // Shadow Section
     #[clap(long, help = "Enable shadow")]
     #[merge(strategy = overwrite_false)]
@@ -94,9 +101,10 @@ pub struct GenerationSettingsArgs {
     #[merge(strategy = swap_option)]
     pub save_format: Option<String>,
     #[clap(flatten)]
+    #[serde(default)]
     pub colors: ColorsArgs,
     #[clap(flatten)]
-    #[serde(rename = "window-controls")]
+    #[serde(rename = "window-controls", default)]
     pub window_controls: WindowControlsArgs,
 }
 
@@ -167,11 +175,22 @@ impl From<GenerationSettingsArgs> for GenerationSettings {
         GenerationSettings {
             copy: val.copy,
             show_notify: val.show_notify,
+            // Only fall back to `out.png` when the user didn't ask for
+            // `--copy`. With `--copy` alone (no `--output`) the user's
+            // intent is "give me the image on the clipboard" — saving a
+            // default file alongside just litters the cwd. Pass an empty
+            // string in that case; `make_output` is gated on it.
             output: val
                 .output
                 .clone()
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| String::from("out.png")),
+                .unwrap_or_else(|| {
+                    if val.copy {
+                        String::new()
+                    } else {
+                        String::from("out.png")
+                    }
+                }),
             save_format: val.save_format.clone(),
             colors: val.colors.into(),
             padding: (val.padding_x.unwrap_or(80), val.padding_y.unwrap_or(100)),
@@ -189,6 +208,7 @@ impl From<GenerationSettingsArgs> for GenerationSettings {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "Hack".to_string()),
             window_controls: val.window_controls.into(),
+            border: !val.no_border,
         }
     }
 }
@@ -237,6 +257,59 @@ impl From<WindowControlsArgs> for WindowControls {
             width: val.window_controls_width.unwrap_or(120),
             height: val.window_controls_height.unwrap_or(40),
             title_padding: val.titlebar_padding.unwrap_or(10),
+        }
+    }
+}
+
+// Explicit defaults so a config with a missing or partial `[general]`
+// section (or omitted sub-keys) deserialises with the same values the
+// CLI would otherwise inject through `From<…Args>`. Keeping these here
+// — rather than `#[derive(Default)]` — makes the contract visible at
+// the type level instead of hiding it inside the `From` impls.
+
+impl Default for GenerationSettingsArgs {
+    fn default() -> Self {
+        Self {
+            fonts: None,
+            radius: Some(15),
+            author: None,
+            author_font: Some("Hack".to_string()),
+            padding_x: Some(80),
+            padding_y: Some(100),
+            no_border: false,
+            shadow: false,
+            shadow_image: false,
+            shadow_blur: Some(50.0),
+            show_notify: false,
+            copy: false,
+            output: None,
+            save_format: None,
+            colors: ColorsArgs::default(),
+            window_controls: WindowControlsArgs::default(),
+        }
+    }
+}
+
+impl Default for ColorsArgs {
+    fn default() -> Self {
+        Self {
+            background: None,
+            author_color: Some("#FFFFFF".to_string()),
+            window_background: None,
+            window_title_color: Some("#FFFFFF".to_string()),
+            shadow_color: None,
+        }
+    }
+}
+
+impl Default for WindowControlsArgs {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            window_title: None,
+            window_controls_width: Some(120),
+            window_controls_height: Some(40),
+            titlebar_padding: Some(10),
         }
     }
 }

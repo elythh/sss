@@ -1,0 +1,261 @@
+.install-layout {
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+}
+
+.install-header {
+  text-align: left;
+  margin-bottom: var(--space-6);
+  padding: var(--space-6) 0;
+  border-bottom: 1px solid var(--c-border);
+
+  h1 {
+    font-size: var(--fs-h1);
+    margin: 0;
+
+    span.binary {
+      font-family: var(--font-mono);
+      color: var(--c-accent);
+    }
+  }
+
+  p {
+    margin-top: var(--space-3);
+    color: var(--c-text-muted);
+    max-width: 60ch;
+  }
+}
+
+.install-binary-toggle {
+  display: inline-flex;
+  background: var(--c-surface-2);
+  padding: 4px;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+
+  button {
+    padding: 8px 18px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+
+    &.is-active {
+      background: var(--c-surface);
+      color: var(--c-text);
+      box-shadow: var(--shadow-1);
+    }
+  }
+}
+
+.install-os-grid {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.install-os-section {
+  background: var(--c-bg-alt);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  position: relative;
+
+  &.is-detected {
+    border-color: var(--c-accent-primary);
+    box-shadow: 0 0 0 1px var(--c-accent-primary-soft);
+  }
+
+  .install-os-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+
+    .install-os-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      background: var(--c-surface);
+      display: grid;
+      place-items: center;
+      color: var(--c-text-muted);
+    }
+
+    h2 { margin: 0; font-size: var(--fs-h3); flex: 1; }
+
+    .install-os-detected {
+      font-family: var(--font-mono);
+      font-size: var(--fs-xs);
+      text-transform: uppercase;
+      letter-spacing: var(--tracking-wide);
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--c-accent-primary-soft);
+      color: var(--c-accent-primary);
+      border: 1px solid var(--c-accent-primary);
+    }
+  }
+}
+
+.install-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.install-tabs-tablist {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  align-self: flex-start;
+
+  button {
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background var(--transition-fast), color var(--transition-fast);
+
+    &:hover { color: var(--c-text); }
+
+    &.is-active {
+      background: var(--c-surface-2);
+      color: var(--c-text);
+      box-shadow: var(--shadow-1);
+    }
+
+    .tab-count {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--c-surface-3);
+      color: var(--c-text-dim);
+    }
+
+    &.is-active .tab-count {
+      background: var(--c-accent-primary-soft);
+      color: var(--c-accent-primary);
+    }
+  }
+}
+
+.install-tab-panel { display: none; }
+.install-tab-panel.is-active { display: block; }
+
+.install-assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.install-asset {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  color: var(--c-text);
+  text-decoration: none;
+  transition: border-color var(--transition-fast),
+              background var(--transition-fast),
+              transform var(--transition-fast);
+
+  &:hover {
+    border-color: var(--c-accent-primary);
+    background: var(--c-surface-2);
+    transform: translateY(-1px);
+
+    .install-asset-download {
+      color: var(--c-accent-primary);
+      background: var(--c-accent-primary-soft);
+    }
+  }
+}
+
+.install-asset-format {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-alt);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  white-space: nowrap;
+}
+
+.install-asset-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.install-asset-arch {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.install-asset-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  code { font-family: inherit; }
+}
+
+.install-asset-size {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text-muted);
+  white-space: nowrap;
+}
+
+.install-asset-download {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-text-muted);
+  transition: background var(--transition-fast), color var(--transition-fast);
+
+  svg { width: 14px; height: 14px; }
+}
+
+.install-release-meta {
+  margin-top: var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+
+  code { font-family: var(--font-mono); }
+}
+
+@media (max-width: 720px) {
+  .install-os-section { padding: var(--space-4); }
+  .install-asset {
+    grid-template-columns: auto 1fr auto;
+    .install-asset-size { display: none; }
+  }
+  .install-asset-name { display: none; }
+}

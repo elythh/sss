@@ -2,8 +2,11 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 
+use image::RgbaImage;
 use sss_capture::{CaptureError, CaptureOptions, Capturer, Image, MonitorId, Rect, WindowId};
+use sss_core::ocr::TextBox;
 use thiserror::Error;
 
 use crate::canvas::Canvas;
@@ -11,6 +14,30 @@ use crate::config::UiConfig;
 use crate::mode::SelectorMode;
 use crate::tool::ToolPalette;
 use crate::trigger::{CaptureTrigger, KeyBind};
+
+/// Hook the CLI plugs in to run OCR over the eager-captured screenshot.
+///
+/// The selector calls the closure once, immediately after the eager
+/// capture succeeds, and stores the returned `Receiver`. Each redraw it
+/// `try_recv`s; the first message becomes [`Canvas::set_text_boxes`].
+///
+/// Returning `Receiver<Vec<TextBox>>` instead of a future keeps this crate
+/// runtime-agnostic — the implementation just spawns a `std::thread`.
+pub type OcrPipeline =
+    Arc<dyn Fn(RgbaImage) -> Receiver<Vec<TextBox>> + Send + Sync>;
+
+/// Pushes a string to the system clipboard. Used by the inline text-copy
+/// flow: when the user has at least one OCR text box selected and triggers
+/// Copy (Ctrl+C or the toolbar icon), the selector invokes this closure
+/// instead of confirming with `PostAction::copy`. The selector stays open
+/// and the box selection is cleared; the user closes the overlay with
+/// Esc / Enter on a clean pass.
+///
+/// Injected from outside (rather than calling arboard directly) so this
+/// crate stays clipboard-backend-agnostic and reuses `sss_lib`'s existing
+/// implementation.
+pub type TextClipboard =
+    Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 /// What the overlay produced.
 #[derive(Clone, Debug)]
@@ -62,11 +89,26 @@ impl Outcome {
 }
 
 /// Action the user signalled before closing the overlay.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct PostAction {
     pub copy: bool,
     pub save: bool,
     pub save_path_hint: Option<PathBuf>,
+    /// State of the output-border toggle when the overlay closed. The host
+    /// passes this through to `sss_lib`'s `GenerationSettings.border` so a
+    /// session-local UI toggle round-trips into the final render.
+    pub border: bool,
+}
+
+impl Default for PostAction {
+    fn default() -> Self {
+        Self {
+            copy: false,
+            save: false,
+            save_path_hint: None,
+            border: true,
+        }
+    }
 }
 
 /// Aggregate result of a [`Selector::run`] call.
@@ -78,7 +120,6 @@ pub struct Selection {
 }
 
 /// Builder for [`Selector`].
-#[derive(Debug)]
 pub struct SelectorBuilder {
     mode: SelectorMode,
     toolbar: bool,
@@ -91,6 +132,30 @@ pub struct SelectorBuilder {
     show_copy: bool,
     show_save: bool,
     save_path_hint: Option<PathBuf>,
+    initial_area: Option<Rect>,
+    ocr_pipeline: Option<OcrPipeline>,
+    text_clipboard: Option<TextClipboard>,
+}
+
+impl std::fmt::Debug for SelectorBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SelectorBuilder")
+            .field("mode", &self.mode)
+            .field("toolbar", &self.toolbar)
+            .field("ui", &self.ui)
+            .field("palette_override", &self.palette_override)
+            .field("trigger", &self.trigger)
+            .field("capturer", &self.capturer)
+            .field("capture_opts", &self.capture_opts)
+            .field("confirm_with_enter", &self.confirm_with_enter)
+            .field("show_copy", &self.show_copy)
+            .field("show_save", &self.show_save)
+            .field("save_path_hint", &self.save_path_hint)
+            .field("initial_area", &self.initial_area)
+            .field("ocr_pipeline", &self.ocr_pipeline.as_ref().map(|_| "<fn>"))
+            .field("text_clipboard", &self.text_clipboard.as_ref().map(|_| "<fn>"))
+            .finish()
+    }
 }
 
 impl Default for SelectorBuilder {
@@ -107,6 +172,9 @@ impl Default for SelectorBuilder {
             show_copy: true,
             show_save: true,
             save_path_hint: None,
+            initial_area: None,
+            ocr_pipeline: None,
+            text_clipboard: None,
         }
     }
 }
@@ -174,6 +242,32 @@ impl SelectorBuilder {
         self
     }
 
+    /// Pre-seed the area selector with a rectangle. The overlay opens with
+    /// this region already drawn, ready to be confirmed or adjusted. Only
+    /// honoured in `Area` / `AnyOf` modes.
+    pub fn initial_area(mut self, rect: Rect) -> Self {
+        self.initial_area = Some(rect);
+        self
+    }
+
+    /// Plug an OCR pipeline in. When set, the eager-captured frame is
+    /// pushed into the closure as soon as the overlay opens; results
+    /// flow back through the returned `Receiver` and end up in the
+    /// canvas via [`Canvas::set_text_boxes`].
+    pub fn ocr_pipeline(mut self, pipeline: OcrPipeline) -> Self {
+        self.ocr_pipeline = Some(pipeline);
+        self
+    }
+
+    /// Provide the closure invoked when the user copies an OCR text
+    /// selection. Required for inline text copy to work — without it, the
+    /// overlay falls back to confirming with `copy = true` even if a text
+    /// box is selected.
+    pub fn text_clipboard(mut self, clip: TextClipboard) -> Self {
+        self.text_clipboard = Some(clip);
+        self
+    }
+
     pub fn build(self) -> Result<Selector, SelectorError> {
         let capturer = match self.capturer {
             Some(c) => c,
@@ -199,6 +293,9 @@ impl SelectorBuilder {
                 show_copy: self.show_copy,
                 show_save: self.show_save,
                 save_path_hint: self.save_path_hint,
+                initial_area: self.initial_area,
+                ocr_pipeline: self.ocr_pipeline,
+                text_clipboard: self.text_clipboard,
             },
             capturer,
         })
@@ -212,7 +309,7 @@ pub struct Selector {
     pub(crate) capturer: Arc<Capturer>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct Config {
     pub mode: SelectorMode,
     pub toolbar: bool,
@@ -224,6 +321,29 @@ pub(crate) struct Config {
     pub show_copy: bool,
     pub show_save: bool,
     pub save_path_hint: Option<PathBuf>,
+    pub initial_area: Option<Rect>,
+    pub ocr_pipeline: Option<OcrPipeline>,
+    pub text_clipboard: Option<TextClipboard>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("mode", &self.mode)
+            .field("toolbar", &self.toolbar)
+            .field("palette", &self.palette)
+            .field("ui", &self.ui)
+            .field("trigger", &self.trigger)
+            .field("capture_opts", &self.capture_opts)
+            .field("confirm_with_enter", &self.confirm_with_enter)
+            .field("show_copy", &self.show_copy)
+            .field("show_save", &self.show_save)
+            .field("save_path_hint", &self.save_path_hint)
+            .field("initial_area", &self.initial_area)
+            .field("ocr_pipeline", &self.ocr_pipeline.as_ref().map(|_| "<fn>"))
+            .field("text_clipboard", &self.text_clipboard.as_ref().map(|_| "<fn>"))
+            .finish()
+    }
 }
 
 impl Selector {

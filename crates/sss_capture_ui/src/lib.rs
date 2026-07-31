@@ -11,9 +11,11 @@ pub use sss_capture::{
 mod canvas;
 mod color;
 mod config;
+mod cursor;
 mod font;
 mod geometry;
 mod hit;
+mod icons;
 mod mode;
 mod selector;
 mod shape;
@@ -28,7 +30,10 @@ pub use canvas::Canvas;
 pub use color::Color;
 pub use config::{ChromeColors, ToolKind, UiConfig};
 pub use mode::SelectorMode;
-pub use selector::{Outcome, PostAction, Selection, Selector, SelectorBuilder, SelectorError};
+pub use selector::{
+    OcrPipeline, Outcome, PostAction, Selection, Selector, SelectorBuilder, SelectorError,
+    TextClipboard,
+};
 pub use shape::{Shape, ShapeId, ShapeKind, Style, TextStyle};
 pub use tool::{BrushSettings, StepSettings, Tool, ToolPalette};
 pub use trigger::{CaptureTrigger, KeyBind, KeyChord};

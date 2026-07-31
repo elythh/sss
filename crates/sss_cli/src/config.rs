@@ -4,7 +4,10 @@ use clap::Parser;
 use merge2::{bool::overwrite_false, option::recursive, Merge};
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use sss_capture_ui::UiConfig;
-use sss_lib::{default_bool, swap_option};
+use sss_lib::config_loader::{load_with_imports, HasImports, LoadError};
+use sss_lib::{default_bool, swap_option, RootArgs};
+#[cfg(feature = "ocr")]
+use sss_ocr::{GpuMode, Language, Tier};
 
 use crate::error::Configuration as ConfigurationError;
 use crate::{str_to_area, Area};
@@ -120,15 +123,15 @@ impl Serialize for WindowSpec {
 #[clap(version, author)]
 #[serde(rename_all = "kebab-case")]
 struct ClapConfig {
-    #[clap(long, help = "Set custom config file path")]
-    #[serde(skip)]
-    #[merge(skip)]
-    config: Option<PathBuf>,
     #[clap(flatten)]
+    #[serde(flatten)]
+    pub root: RootArgs,
+    #[clap(flatten)]
+    #[serde(default)]
     #[merge(strategy = recursive)]
     pub cli: Option<CliConfig>,
     #[clap(flatten)]
-    #[serde(rename = "general")]
+    #[serde(rename = "general", default)]
     pub lib_config: sss_lib::GenerationSettingsArgs,
     /// Configuration block for the interactive selector / annotation UI.
     /// Loaded from `[capture-ui]` in `config.toml`; not exposed as
@@ -138,6 +141,11 @@ struct ClapConfig {
     #[serde(default, rename = "capture-ui")]
     #[merge(strategy = swap_option)]
     pub capture_ui: Option<UiConfig>,
+    #[cfg(feature = "ocr")]
+    #[clap(flatten)]
+    #[serde(default, rename = "ocr")]
+    #[merge(strategy = recursive)]
+    pub ocr: Option<OcrConfig>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Merge, Parser, Serialize)]
@@ -235,6 +243,14 @@ pub struct CliConfig {
     #[merge(strategy = overwrite_false)]
     #[serde(default = "default_bool")]
     pub verbose: bool,
+
+    /// Persist the last interactive area selection and pre-seed the
+    /// selector with it next time `--area` is opened without a value.
+    /// Stored under `${XDG_CONFIG_HOME}/sss/last_selection.toml`.
+    #[clap(long, help = "Remember the last interactive area selection.")]
+    #[merge(strategy = overwrite_false)]
+    #[serde(default = "default_bool")]
+    pub remember_last_selection: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -322,6 +338,169 @@ impl CliConfig {
     }
 }
 
+// --------------------------------------------------------------------------
+// [ocr] section
+// --------------------------------------------------------------------------
+
+/// Configuration block for the OCR engine. Loaded from `[ocr]` in
+/// `config.toml`; the user-facing `--ocr [true|false]` flag overrides
+/// `enable` from the command line.
+///
+/// Everything except `enable` lives in the config file only — the surface
+/// (tier, language list, model overrides) is wider than what's pleasant on
+/// the command line and these settings rarely change between captures.
+#[cfg(feature = "ocr")]
+#[derive(Clone, Debug, Default, Deserialize, Merge, Parser, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OcrConfig {
+    /// Run the OCR pipeline after every capture. When false the selector
+    /// behaves exactly as the OCR-less build did.
+    #[clap(
+        id = "ocr-enable",
+        long = "ocr",
+        value_name = "BOOL",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        value_parser = clap::builder::BoolishValueParser::new(),
+        help = "Enable or disable the OCR pipeline for this run (true|false)."
+    )]
+    #[merge(strategy = swap_option)]
+    pub enable: Option<bool>,
+
+    /// Picks model sizes against host hardware. `auto` (default) chooses
+    /// between light/standard/heavy at startup.
+    #[clap(skip)]
+    #[serde(default = "default_tier")]
+    #[merge(strategy = overwrite_tier)]
+    pub tier: Tier,
+
+    /// Recognition languages to pre-download. The first entry is the
+    /// active one at runtime; the rest stay cached for fast switching.
+    /// Accepts both ISO 639-1 codes (`"en"`, `"es"`, `"ja"`) and the
+    /// PaddleOCR script names (`"latin"`, `"cyrillic"`, `"arabic"`).
+    /// Defaults to `["auto"]`.
+    #[clap(skip)]
+    #[serde(default = "default_languages")]
+    #[merge(strategy = merge_languages)]
+    pub language: Vec<String>,
+
+    /// Opt into the formula recognition model. Only honoured at
+    /// [`Tier::Heavy`] — at lighter tiers the formula model is skipped.
+    #[clap(skip)]
+    #[serde(default = "default_bool")]
+    #[merge(strategy = overwrite_false)]
+    pub formula: bool,
+
+    /// Override the on-disk cache directory. When empty (the default) the
+    /// OCR worker uses `$XDG_DATA_HOME/sss/models` (or the equivalent on
+    /// macOS / Windows via [`directories`]).
+    #[clap(skip)]
+    #[serde(default)]
+    #[merge(strategy = swap_option)]
+    pub models_dir: Option<PathBuf>,
+
+    /// Execution provider for ORT inference. `auto` (default) picks the
+    /// best provider compiled into the binary for the host — falls back
+    /// to CPU when no GPU EP is available. Explicit values force the
+    /// pipeline onto a specific backend; ORT still falls back to CPU at
+    /// runtime if the EP isn't actually present in the loaded
+    /// `libonnxruntime`.
+    #[clap(
+        long = "ocr-gpu",
+        value_name = "MODE",
+        default_value = "auto",
+        value_parser = parse_gpu_mode,
+        help = "OCR execution provider: auto, cpu, cuda, tensorrt, coreml, directml, openvino, webgpu."
+    )]
+    #[serde(default = "default_gpu")]
+    #[merge(strategy = overwrite_gpu)]
+    pub gpu: GpuMode,
+}
+
+#[cfg(feature = "ocr")]
+fn default_gpu() -> GpuMode {
+    GpuMode::Auto
+}
+
+#[cfg(feature = "ocr")]
+fn parse_gpu_mode(s: &str) -> Result<GpuMode, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "auto" => Ok(GpuMode::Auto),
+        "cpu" => Ok(GpuMode::Cpu),
+        "cuda" => Ok(GpuMode::Cuda),
+        "tensorrt" | "tensor-rt" | "trt" => Ok(GpuMode::TensorRT),
+        "coreml" | "core-ml" => Ok(GpuMode::CoreML),
+        "directml" | "direct-ml" | "dml" => Ok(GpuMode::DirectML),
+        "openvino" | "open-vino" => Ok(GpuMode::OpenVino),
+        "webgpu" | "web-gpu" => Ok(GpuMode::WebGpu),
+        other => Err(format!(
+            "unknown GPU mode '{other}'; expected one of: auto, cpu, cuda, tensorrt, coreml, directml, openvino, webgpu"
+        )),
+    }
+}
+
+/// Preserve a non-`Auto` GPU mode from one side; `Auto` never overrides
+/// an explicit choice from the other layer.
+#[cfg(feature = "ocr")]
+fn overwrite_gpu(dst: &mut GpuMode, src: &mut GpuMode) {
+    if !matches!(*src, GpuMode::Auto) {
+        *dst = *src;
+    }
+}
+
+#[cfg(feature = "ocr")]
+fn default_tier() -> Tier {
+    Tier::Auto
+}
+
+#[cfg(feature = "ocr")]
+fn default_languages() -> Vec<String> {
+    vec!["auto".to_string()]
+}
+
+/// Overwrite `dst` with `src` unless `src` is `Auto` and `dst` is set —
+/// preserves a "stronger" tier coming from the CLI override.
+#[cfg(feature = "ocr")]
+fn overwrite_tier(dst: &mut Tier, src: &mut Tier) {
+    if !matches!(*src, Tier::Auto) {
+        *dst = *src;
+    }
+}
+
+/// Replace the language list when the override is non-empty; otherwise
+/// keep the existing list. Mirrors how single-value `Option` merges work.
+#[cfg(feature = "ocr")]
+fn merge_languages(dst: &mut Vec<String>, src: &mut Vec<String>) {
+    if !src.is_empty() {
+        *dst = std::mem::take(src);
+    }
+}
+
+#[cfg(feature = "ocr")]
+impl OcrConfig {
+    /// Returns `true` when OCR is enabled. Defaults to **true** when the
+    /// field is missing from both the config file and the CLI — matching
+    /// the product decision "OCR on by default".
+    pub fn is_enabled(&self) -> bool {
+        self.enable.unwrap_or(true)
+    }
+
+    /// Parses the configured language codes into [`Language`] enum values.
+    pub fn languages(&self) -> Vec<Language> {
+        sss_ocr::resolve_language(&self.language)
+    }
+
+    /// Effective tier after resolving `Auto` against the host hardware.
+    pub fn effective_tier(&self) -> Tier {
+        self.tier.resolve()
+    }
+
+    /// Selected ORT execution provider for OCR inference.
+    pub fn gpu(&self) -> GpuMode {
+        self.gpu
+    }
+}
+
 /// Outcome of resolving the CLI flags before opening the selector.
 #[derive(Clone, Debug)]
 pub enum DirectTarget {
@@ -335,11 +514,25 @@ pub enum DirectTarget {
     Window(String),
 }
 
-pub fn get_config() -> Result<(CliConfig, sss_lib::GenerationSettings, UiConfig), ConfigurationError>
-{
+impl HasImports for ClapConfig {
+    fn take_imports(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.root.imports)
+    }
+}
+
+/// Fully-resolved CLI + config bundle returned by [`get_config`].
+pub struct ResolvedConfig {
+    pub cli: CliConfig,
+    pub lib: sss_lib::GenerationSettings,
+    pub ui: UiConfig,
+    #[cfg(feature = "ocr")]
+    pub ocr: OcrConfig,
+}
+
+pub fn get_config() -> Result<ResolvedConfig, ConfigurationError> {
     let mut args = ClapConfig::parse();
 
-    let config_path = if let Some(path) = args.config.as_ref() {
+    let config_path = if let Some(path) = args.root.config.as_ref() {
         tracing::trace!("Loading custom path");
         path.clone()
     } else {
@@ -355,19 +548,25 @@ pub fn get_config() -> Result<(CliConfig, sss_lib::GenerationSettings, UiConfig)
     };
     tracing::info!("Reading configs from path: {config_path:?}");
 
-    if let Ok(cfg_content) = std::fs::read_to_string(config_path) {
+    let loaded = load_with_imports(&config_path, &|s| toml::from_str::<ClapConfig>(s))
+        .map_err(|e| match e {
+            LoadError::Io(e) => ConfigurationError::Io(e),
+            LoadError::Parse(e) => ConfigurationError::Deserialization(e),
+        })?;
+
+    let merged = if let Some(mut config) = loaded {
         tracing::debug!("Merging from config file");
-        let mut config: ClapConfig = toml::from_str(&cfg_content)?;
         config.merge(&mut args);
-        return Ok((
-            config.cli.unwrap_or_default(),
-            config.lib_config.into(),
-            config.capture_ui.unwrap_or_default(),
-        ));
-    }
-    Ok((
-        args.cli.unwrap_or_default(),
-        args.lib_config.into(),
-        args.capture_ui.unwrap_or_default(),
-    ))
+        config
+    } else {
+        args
+    };
+
+    Ok(ResolvedConfig {
+        cli: merged.cli.unwrap_or_default(),
+        lib: merged.lib_config.into(),
+        ui: merged.capture_ui.unwrap_or_default(),
+        #[cfg(feature = "ocr")]
+        ocr: merged.ocr.unwrap_or_default(),
+    })
 }
